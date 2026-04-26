@@ -194,6 +194,7 @@ int print_pgtbl(struct pcb_t *ip, addr_t start, addr_t end);
 // addr_t* get_pgd_root(struct pcb_t *caller, addr_t pgd_idx);
 int k_pte_set_fpn(struct pcb_t *caller, addr_t pgn, addr_t fpn);
 uint32_t k_pte_get_entry(struct pcb_t *caller, addr_t pgn);
+int k_pte_set_entry(struct pcb_t *caller, addr_t pgn, uint32_t pte_val);
 addr_t k_vmap_page_range(struct pcb_t *caller, addr_t addr, int pgnum, 
                          struct framephy_struct *frames, struct vm_rg_struct *ret_rg);
 #endif

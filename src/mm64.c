@@ -376,6 +376,38 @@ int pte_set_entry(struct pcb_t *caller, addr_t pgn, uint32_t pte_val)
 	return 0;
 }
 
+/* Set Kernel PTE page table entry
+ * @caller : caller
+ * @pgn    : page number
+ * @pte_val: page table entry raw value
+ **/
+int k_pte_set_entry(struct pcb_t *caller, addr_t pgn, uint32_t pte_val)
+{
+	addr_t pgd_idx, p4d_idx, pud_idx, pmd_idx, pt_idx;
+
+	get_pd_from_pagenum(pgn, &pgd_idx, &p4d_idx, &pud_idx, &pmd_idx, &pt_idx);
+
+	if (caller == NULL || caller->krnl == NULL || caller->krnl->krnl_pgd == NULL)
+		return -1;
+
+	addr_t *pgd_root = caller->krnl->krnl_pgd;
+	if (pgd_root[pgd_idx] == 0)
+		return -1;
+	addr_t *p4d = (addr_t *)(pgd_root[pgd_idx]);
+	if (p4d[p4d_idx] == 0)
+		return -1;
+	addr_t *pud = (addr_t *)(p4d[p4d_idx]);
+	if (pud[pud_idx] == 0)
+		return -1;
+	addr_t *pmd = (addr_t *)(pud[pud_idx]);
+	if (pmd[pmd_idx] == 0)
+		return -1;
+	addr_t *pt = (addr_t *)(pmd[pmd_idx]);
+
+	pt[pt_idx] = pte_val;
+	return 0;
+}
+
 /*
  * vmap_pgd_memset - map a range of page at aligned address
  */
@@ -437,11 +469,7 @@ addr_t vmap_page_range(struct pcb_t *caller,		   // process call
 
 		// 3. Build the PTE
 		pte_set_fpn(caller, pgn, fpit->fpn);
-
-		// Only enlist user pages into the FIFO swap queue, not pinned kernel pages
-		if (caller->krnl == NULL || caller->mm != caller->krnl->mm) {
-			enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
-		}
+		enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
 
 		fpit = fpit->fp_next;
 	}
