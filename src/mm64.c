@@ -576,7 +576,7 @@ addr_t k_vmap_page_range(struct pcb_t *caller, addr_t addr, int pgnum,
 		if (fpit == NULL)
 			break;
 
-		addr_t pgn = PAGING_PGN(addr + (pgit * PAGING64_PAGESZ));
+		addr_t pgn = PAGING64_PGN(addr + (pgit * PAGING64_PAGESZ));
 
 		/* Call the Kernel version of the setter */
 		k_pte_set_fpn(caller, pgn, fpit->fpn);
