@@ -75,13 +75,21 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
     /*Allocate at the toproof */
     pthread_mutex_lock(&mmvm_lock);
 
-    struct vm_rg_struct* symbol_id_struct_ptr = get_symrg_byid(caller->mm, rgid);
-    if (symbol_id_struct_ptr == NULL)
+    /* Find an empty symbol region in the table instead of using the passed rgid */
+    rgid = -1;
+    for (int i = 0; i < PAGING_MAX_SYMTBL_SZ; i++)
+    {
+        if (caller->mm->symrgtbl[i].rg_start == 0 && caller->mm->symrgtbl[i].rg_end == 0)
+        {
+            rgid = i;
+            break;
+        }
+    }
+    if (rgid == -1)
     {
         pthread_mutex_unlock(&mmvm_lock);
         return -1;
     }
-    // check for valid
 
     struct vm_rg_struct rgnode;
     rgnode.mode_bit = 1;
@@ -147,6 +155,21 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t *allo
 
     *alloc_addr = old_sbrk;
 
+    /* Address internal fragmentation: enlist leftover space to free list */
+    if (old_sbrk + size < cur_vma->sbrk)
+    {
+        struct vm_rg_struct *leftover_rg = malloc(sizeof(struct vm_rg_struct));
+        if (leftover_rg != NULL)
+        {
+            leftover_rg->rg_start = old_sbrk + size;
+            leftover_rg->rg_end = cur_vma->sbrk;
+            leftover_rg->vmaid = cur_vma->vm_id;
+            leftover_rg->mode_bit = 1; /* User mode */
+            leftover_rg->rg_next = NULL;
+            enlist_vm_freerg_list(caller->mm, leftover_rg);
+        }
+    }
+
     pthread_mutex_unlock(&mmvm_lock);
     return 0;
 }
@@ -197,7 +220,7 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
     rgnode->rg_next = NULL;
 
     /*enlist the obsoleted memory region */
- 
+    
     pthread_mutex_unlock(&mmvm_lock);
     return 0;
 }
@@ -209,7 +232,7 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
  */
 int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
 {
-    addr_t addr;
+    addr_t addr = proc->regs[reg_index];
     // ???
     // vmaid lay dau ra?
     int val = __alloc(proc, 0, reg_index, size, &addr);
@@ -362,8 +385,8 @@ int k_pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
  */
 int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
-    int pgn = PAGING_PGN(addr);
-    int off = PAGING_OFFST(addr);
+    int pgn = PAGING64_PGN(addr);
+    int off = PAGING64_OFFST(addr);
     int fpn;
 
     if (pg_getpage(mm, pgn, &fpn, caller) != 0)
@@ -388,8 +411,8 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
  */
 int k_pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
-    int pgn = PAGING_PGN(addr);
-    int off = PAGING_OFFST(addr);
+    int pgn = PAGING64_PGN(addr);
+    int off = PAGING64_OFFST(addr);
     int fpn;
 
     if (k_pg_getpage(mm, pgn, &fpn, caller) != 0)
@@ -409,8 +432,8 @@ int k_pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller
  */
 int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
-    int pgn = PAGING_PGN(addr);
-    int off = PAGING_OFFST(addr);
+    int pgn = PAGING64_PGN(addr);
+    int off = PAGING64_OFFST(addr);
     int fpn;
 
     /* Get the page to MEMRAM, swap from MEMSWAP if needed */
@@ -441,8 +464,8 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
  */
 int k_pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
-    int pgn = PAGING_PGN(addr);
-    int off = PAGING_OFFST(addr);
+    int pgn = PAGING64_PGN(addr);
+    int off = PAGING64_OFFST(addr);
     int fpn;
 
     /* Get the page to MEMRAM, swap from MEMSWAP if needed */
@@ -596,7 +619,7 @@ int libkmem_malloc(struct pcb_t *caller, uint32_t size, uint32_t reg_index)
      */
 
     addr_t addr;
-    if  (__kmalloc(caller, -1, reg_index, size, &addr) != 0)
+    if  (__kmalloc(caller, 0, reg_index, size, &addr) != 0)
     {
         caller->regs[reg_index] = addr;
     }
@@ -624,43 +647,67 @@ addr_t __kmalloc(struct pcb_t *caller, int vmaid, int rgid, addr_t size, addr_t 
     struct mm_struct *krnl_mm = caller->krnl->mm;
     
     struct vm_area_struct *cur_vma = get_vma_by_num(krnl_mm, vmaid);
-    struct vm_rg_struct *ret_rg = init_vm_rg(0, 0);
+    struct vm_rg_struct ret_rg;
 
-    if (cur_vma == NULL || ret_rg == NULL)
+    if (cur_vma == NULL)
     {
         pthread_mutex_unlock(&mmvm_lock);
         return -1;
     }
        
-    ret_rg->mode_bit = 0; 
-    if (get_free_vmrg_area(caller,vmaid,size,ret_rg) != 0)
+    ret_rg.mode_bit = 0; 
+    if (get_free_vmrg_area(caller,vmaid,size,&ret_rg) != 0)
     {
         addr_t old_sbrk = cur_vma->sbrk;
         if (k_inc_vma_limit(caller, vmaid, size) == -1)
         {
-              pthread_mutex_unlock(&mmvm_lock);
-              return 0x0;
+            pthread_mutex_unlock(&mmvm_lock);
+            return 0x0;
         }
         else
         {
-           ret_rg->rg_start = old_sbrk;
-           ret_rg->rg_end = old_sbrk + size;
-           ret_rg->vmaid = vmaid;
+           ret_rg.rg_start = old_sbrk;
+           ret_rg.rg_end = old_sbrk + size;
+           ret_rg.vmaid = vmaid;
+
+           // Elist the free space between region end and sbrk
+           if (old_sbrk + size < cur_vma->sbrk)
+           {
+               struct vm_rg_struct *leftover_rg = malloc(sizeof(struct vm_rg_struct));
+               if (leftover_rg != NULL)
+               {
+                   leftover_rg->rg_start = old_sbrk + size;
+                   leftover_rg->rg_end = cur_vma->sbrk;
+                   leftover_rg->vmaid = cur_vma->vm_id;
+                   leftover_rg->mode_bit = 0; /* Kernel mode */
+                   leftover_rg->rg_next = NULL;
+                   enlist_vm_freerg_list(caller->krnl->mm, leftover_rg);
+               }
+           }
         }
 
     }
     
-    if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ)
+    /* Find an empty symbol region in the table instead of using the passed rgid */
+    rgid = -1;
+    for (int i = 0; i < PAGING_MAX_SYMTBL_SZ; i++)
     {
-        free(ret_rg);
+        if (krnl_mm->symrgtbl[i].rg_start == 0 && krnl_mm->symrgtbl[i].rg_end == 0)
+        {
+            rgid = i;
+            break;
+        }
+    }
+    if (rgid == -1)
+    {
         pthread_mutex_unlock(&mmvm_lock);
         return 0x0;
     }
-        krnl_mm->symrgtbl[rgid].rg_start = ret_rg->rg_start;
-        krnl_mm->symrgtbl[rgid].rg_end = ret_rg->rg_end;
-        krnl_mm->symrgtbl[rgid].vmaid = ret_rg->vmaid;
-        krnl_mm->symrgtbl[rgid].mode_bit = ret_rg->mode_bit;
-        *alloc_addr = ret_rg->rg_start;
+    krnl_mm->symrgtbl[rgid].rg_start = ret_rg.rg_start;
+    krnl_mm->symrgtbl[rgid].rg_end = ret_rg.rg_end;
+    krnl_mm->symrgtbl[rgid].vmaid = ret_rg.vmaid;
+    krnl_mm->symrgtbl[rgid].mode_bit = ret_rg.mode_bit;
+    *alloc_addr = ret_rg.rg_start;
    
     pthread_mutex_unlock(&mmvm_lock);
     return 0;
@@ -920,7 +967,7 @@ int free_pcb_memph(struct pcb_t *caller) // TODO: review concept of demand pagin
     while (vma != NULL)
     {
         for (addr_t vaddr = vma->vm_start; vaddr < vma->vm_end; vaddr+=PAGING64_PAGESZ) {
-            addr_t pgn = PAGING_PGN(vaddr);
+            addr_t pgn = PAGING64_PGN(vaddr);
             
             pte = pte_get_entry(caller, pgn);
 
