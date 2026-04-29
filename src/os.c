@@ -117,21 +117,10 @@ static void * ld_routine(void * args) {
   /* TODO init kernel page table directory */
 #ifdef MM64
 	os.krnl_pgd = malloc(PAGING64_MAX_PGN * sizeof(addr_t));
-	os.krnl_p4d = malloc(PAGING64_MAX_PGN * sizeof(addr_t));
-	os.krnl_pud = malloc(PAGING64_MAX_PGN * sizeof(addr_t));
-	os.krnl_pmd = malloc(PAGING64_MAX_PGN * sizeof(addr_t));
-	os.krnl_pt = malloc(PAGING64_MAX_PGN * sizeof(addr_t));
-
-	for (i = 0; i < PAGING64_MAX_PGN; i++)
-	{
-	   os.krnl_pgd[i] = (addr_t)&os.krnl_p4d;
-	   os.krnl_p4d[i] = (addr_t)&os.krnl_pud;
-	   os.krnl_pud[i] = (addr_t)&os.krnl_pmd;
-	   os.krnl_pmd[i] = (addr_t)&os.krnl_pt;
-	   os.krnl_pt[i] = 0;
-	}
+	memset(os.krnl_pgd, 0, PAGING64_MAX_PGN * sizeof(addr_t));
 #else
 	os.krnl_pgd = malloc(PAGING_MAX_PGN * sizeof(uint32_t));
+	memset(os.krnl_pgd, 0, PAGING_MAX_PGN * sizeof(uint32_t));
 #endif
 	i=0;
 	printf("ld_routine\n");
@@ -147,9 +136,10 @@ static void * ld_routine(void * args) {
 		while (current_time() < ld_processes.start_time[i]) {
 			next_slot(timer_id);
 		}
+// TODO: push this part outside of the loop
 #ifdef MM_PAGING
 		krnl->mm = malloc(sizeof(struct mm_struct));
-		init_mm(krnl->mm, proc);
+		init_mm(krnl->mm, proc); // TODO: change to k_init_mm
 		krnl->mram = mram;
 		krnl->mswp = mswp;
 		krnl->active_mswp = active_mswp;
@@ -301,6 +291,3 @@ int main(int argc, char * argv[]) {
 	return 0;
 
 }
-
-
-
