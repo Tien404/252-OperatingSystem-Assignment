@@ -52,7 +52,16 @@ static struct pcb_t *find_proc_by_pid(struct krnl_t *krnl, uint32_t pid)
         return proc;
     }
     /*Just for safety*/
-    return find_proc_in_queue(krnl->ready_queue, pid);
+    #if defined(MLQ_SCHED)
+        for (int i=0; i < MAX_PRIO; i++)
+        {
+            proc = find_proc_in_queue(&krnl->mlq_ready_queue[i], pid);
+            if (proc) return proc;
+        }
+    #else
+        return find_proc_in_queue(krnl->ready_queue, pid);
+    #endif
+    return NULL;
 }
 int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs *regs)
 {

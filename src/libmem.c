@@ -806,22 +806,40 @@ addr_t __kmem_cache_alloc(struct pcb_t *caller, int vmaid, int rgid, int cache_p
 
 int libkmem_copy_from_user(struct pcb_t *caller, uint32_t source, uint32_t destination, uint32_t offset, uint32_t size)
 {
-    /* TODO: provide OS level management kmem
-     */  //i.e: check ...
-    /*
-     * TODO: Map kernel address range
-     */
-    //__read_user_mem(...)
-    //__write_kernel_mem(...);
+    addr_t user_addr = caller->regs[source];
+    addr_t kernel_addr = caller->regs[destination];
+
+    int user_vmaid = get_vmaid_by_addr(caller->mm, user_addr);
+    int user_rgid = get_rgid_by_addr(caller->mm, user_addr);
+
+    int kernel_vmaid = get_vmaid_by_addr(caller->krnl->mm, kernel_addr);
+    int kernel_rgid = get_rgid_by_addr(caller->krnl->mm, kernel_addr);
+
+    if (user_vmaid < 0 || user_rgid < 0 || kernel_vmaid < 0 || kernel_rgid < 0)
+        return -1;
+
+    struct vm_rg_struct *user_rg = get_symrg_byid(caller->mm, user_rgid);
+    struct vm_rg_struct *kernel_rg = get_symrg_byid(caller->krnl->mm, kernel_rgid);
+
+    if (user_rg == NULL || kernel_rg == NULL)
+        return -1;
+
+    /* Check if the size will make it go outside of either region */
+    if (user_rg->rg_start + offset + size > user_rg->rg_end ||
+        kernel_rg->rg_start + offset + size > kernel_rg->rg_end)
+    {
+        return -1;
+    }
+
     BYTE data;
 
     for (uint32_t i = 0; i < size; i++)
     {
-        if (__read_user_mem(caller, 0, source, offset + i, &data) != 0)
+        if (__read_user_mem(caller, user_vmaid, user_rgid, offset + i, &data) != 0)
         {
             return -1;
         }
-        if (__write_kernel_mem(caller, 0, destination, offset + i, data) != 0)
+        if (__write_kernel_mem(caller, kernel_vmaid, kernel_rgid, offset + i, data) != 0)
         {
             return -1;
         }
@@ -832,22 +850,40 @@ int libkmem_copy_from_user(struct pcb_t *caller, uint32_t source, uint32_t desti
 
 int libkmem_copy_to_user(struct pcb_t *caller, uint32_t source, uint32_t destination, uint32_t offset, uint32_t size)
 {
-    /* TODO: provide OS level management kmem
-     */
-    /*
-     * TODO: Map kernel address range
-     */
-    //__read_kernel_mem(...)
-    //__write_user_mem(...);
+    addr_t kernel_addr = caller->regs[source];
+    addr_t user_addr = caller->regs[destination];
+
+    int kernel_vmaid = get_vmaid_by_addr(caller->krnl->mm, kernel_addr);
+    int kernel_rgid = get_rgid_by_addr(caller->krnl->mm, kernel_addr);
+
+    int user_vmaid = get_vmaid_by_addr(caller->mm, user_addr);
+    int user_rgid = get_rgid_by_addr(caller->mm, user_addr);
+
+    if (kernel_vmaid < 0 || kernel_rgid < 0 || user_vmaid < 0 || user_rgid < 0)
+        return -1;
+
+    struct vm_rg_struct *user_rg = get_symrg_byid(caller->mm, user_rgid);
+    struct vm_rg_struct *kernel_rg = get_symrg_byid(caller->krnl->mm, kernel_rgid);
+
+    if (user_rg == NULL || kernel_rg == NULL)
+        return -1;
+
+    /* Check if the size will make it go outside of either region */
+    if (kernel_rg->rg_start + offset + size > kernel_rg->rg_end ||
+        user_rg->rg_start + offset + size > user_rg->rg_end)
+    {
+        return -1;
+    }
+
     BYTE data;
 
     for (uint32_t i = 0; i < size; i++)
     {
-        if (__read_kernel_mem(caller, 0, source, offset + i, &data) != 0)
+        if (__read_kernel_mem(caller, kernel_vmaid, kernel_rgid, offset + i, &data) != 0)
         {
             return -1;
         }
-        if (__write_user_mem(caller, 0, destination, offset + i, data) != 0)
+        if (__write_user_mem(caller, user_vmaid, user_rgid, offset + i, data) != 0)
         {
             return -1;
         }
