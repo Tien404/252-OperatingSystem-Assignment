@@ -218,7 +218,7 @@ int init_pte(addr_t *pte, int pre, addr_t fpn, int drt, int swp, int swptyp, add
 		}
 		else
 		{ // page swapped
-			SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
+			CLRBIT(*pte, PAGING_PTE_PRESENT_MASK);
 			SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 			CLRBIT(*pte, PAGING_PTE_DIRTY_MASK);
 
@@ -254,7 +254,7 @@ int pte_set_swap(struct pcb_t *caller, addr_t pgn, int swptyp, addr_t swpoff)
 	uint32_t *pte = (uint32_t *)&caller->mm->pgd[pgn];
 #endif
 
-	SETBIT(*pte, PAGING_PTE_PRESENT_MASK);
+	CLRBIT(*pte, PAGING_PTE_PRESENT_MASK);
 	SETBIT(*pte, PAGING_PTE_SWAPPED_MASK);
 	SETVAL(*pte, swptyp, PAGING_PTE_SWPTYP_MASK, PAGING_PTE_SWPTYP_LOBIT);
 	SETVAL(*pte, swpoff, PAGING_PTE_SWPOFF_MASK, PAGING_PTE_SWPOFF_LOBIT);
