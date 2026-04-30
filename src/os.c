@@ -122,6 +122,18 @@ static void * ld_routine(void * args) {
 	os.krnl_pgd = malloc(PAGING_MAX_PGN * sizeof(uint32_t));
 	memset(os.krnl_pgd, 0, PAGING_MAX_PGN * sizeof(uint32_t));
 #endif
+
+#ifdef MM_PAGING
+	os.mm = malloc(sizeof(struct mm_struct));
+#ifdef MM64
+	k_init_mm(os.mm, &os);
+#else
+	init_mm(os.mm, NULL);
+#endif
+	os.mram = mram;
+	os.mswp = mswp;
+	os.active_mswp = active_mswp;
+#endif
 	i=0;
 	printf("ld_routine\n");
 	while (i < num_processes) {
@@ -136,14 +148,6 @@ static void * ld_routine(void * args) {
 		while (current_time() < ld_processes.start_time[i]) {
 			next_slot(timer_id);
 		}
-// TODO: push this part outside of the loop
-#ifdef MM_PAGING
-		krnl->mm = malloc(sizeof(struct mm_struct));
-		init_mm(krnl->mm, proc); // TODO: change to k_init_mm
-		krnl->mram = mram;
-		krnl->mswp = mswp;
-		krnl->active_mswp = active_mswp;
-#endif
 		printf("\tLoaded a process at %s, PID: %d PRIO: %ld\n",
 			ld_processes.path[i], proc->pid, ld_processes.prio[i]);
 		add_proc(proc);
