@@ -268,7 +268,11 @@ int main(int argc, char * argv[]) {
 	struct memphy_struct mswp[PAGING_MAX_MMSWP];
 
 	/* Create MEM RAM */
-	init_memphy(&mram, memramsz, rdmflag);
+	if (init_memphy(&mram, memramsz, rdmflag) == -1)
+	{
+		printf("Not enough memory to create MEMRAM!\n");
+		return 0;
+	}
 
         /* Create all MEM SWAP */ 
 	rdmflag = 0;

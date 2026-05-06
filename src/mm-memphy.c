@@ -246,14 +246,14 @@ int init_memphy(struct memphy_struct *mp, addr_t max_size, int randomflg)
     mp->maxsz = max_size;
     memset(mp->storage, 0, max_size * sizeof(BYTE));
 
-    MEMPHY_format(mp, PAGING64_PAGESZ);
+    int ret = MEMPHY_format(mp, PAGING64_PAGESZ);
 
     mp->rdmflg = (randomflg != 0) ? 1 : 0;
 
     if (!mp->rdmflg) /* Not Ramdom acess device, then it serial device*/
         mp->cursor = 0;
 
-    return 0;
+    return ret;
 }
 /*
  * MEMPHY_get_contiguous_freefp: find and get a continuous frames inside the physical memory (kernel use)
