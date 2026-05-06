@@ -329,11 +329,14 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
          * SYSCALL 1 sys_memmap
          */
         
-        arg_t a1 = SYSMEM_SWP_OP;
-        arg_t a2 = vicfpn;
-        arg_t a3 = swpfpn;
-
-        libsyscall(caller, 17, a1, a2, a3);
+        /* Optimize: Swap out ONLY if the victim page is dirty */
+        if (vicpte & PAGING_PTE_DIRTY_MASK)
+        {
+            arg_t a1 = SYSMEM_SWP_OP;
+            arg_t a2 = vicfpn;
+            arg_t a3 = swpfpn;
+            libsyscall(caller, 17, a1, a2, a3);
+        }
         // _syscall(caller->krnl, caller->pid, 17, &regs);
 
         /* Update page table */
@@ -357,6 +360,19 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 
         /* Update target's page table to point to the new RAM frame */
         pte_set_fpn(caller, pgn, vicfpn);
+
+        /* Update Dirty bit on the newly loaded page */
+        uint32_t newpte = pte_get_entry(caller, pgn);
+        if (pte & PAGING_PTE_SWAPPED_MASK)
+        {
+            /* Swap frame was freed, MUST mark dirty so it's written back on eviction */
+            SETBIT(newpte, PAGING_PTE_DIRTY_MASK);
+        }
+        else
+        {
+            CLRBIT(newpte, PAGING_PTE_DIRTY_MASK);
+        }
+        pte_set_entry(caller, pgn, newpte);
 
         /* Enlist the new page in the USER's FIFO tracking list */
         enlist_pgn_node(&mm->fifo_pgn, pgn);
@@ -458,6 +474,11 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
      *  MEMPHY WRITE with SYSMEM_IO_WRITE
      * SYSCALL 17 sys_memmap
      */
+
+    /* Set the dirty bit since the page has been modified */
+    uint32_t pte = pte_get_entry(caller, pgn);
+    SETBIT(pte, PAGING_PTE_DIRTY_MASK);
+    pte_set_entry(caller, pgn, pte);
 
     return 0;
 }
