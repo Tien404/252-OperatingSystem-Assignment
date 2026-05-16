@@ -35,16 +35,24 @@ def parse_input(input_filename):
 
 def parse_log(filename, num_cpus):
     """
-    Parse log file and build schedule for each CPU.
+    Parse log file and build intervals for each CPU.
     """
     cpu_state: dict[int, int | None] = {i: None for i in range(num_cpus)}
-    cpu_schedule: dict[int, dict[int, int | None]] = {i: {} for i in range(num_cpus)}
+    cpu_start: dict[int, int] = {i: 0 for i in range(num_cpus)}
+    cpu_intervals: dict[int, list[tuple[int, int, int | None]]] = {i: [] for i in range(num_cpus)}
     current_time = None
 
     time_slot_pattern = re.compile(r"Time slot\s+(\d+)")
+    put_pattern = re.compile(r"CPU\s+(\d+):\s+Put process\s+(\d+)\s+to run queue")
     dispatched_pattern = re.compile(r"CPU\s+(\d+):\s+Dispatched process\s+(\d+)")
     processed_pattern = re.compile(r"CPU\s+(\d+):\s+Processed\s+(\d+)\s+has finished")
     stopped_pattern = re.compile(r"CPU\s+(\d+)\s+stopped")
+
+    def close_interval(cpu, end_time):
+        duration = end_time - cpu_start[cpu]
+        if duration > 0:
+            cpu_intervals[cpu].append((cpu_start[cpu], duration, cpu_state[cpu]))
+        cpu_start[cpu] = end_time
 
     with open(filename, 'r') as f:
         for line in f:
@@ -55,8 +63,14 @@ def parse_log(filename, num_cpus):
             ts_match = time_slot_pattern.search(line)
             if ts_match:
                 current_time = int(ts_match.group(1))
-                for cpu in cpu_state:
-                    cpu_schedule[cpu][current_time] = cpu_state[cpu]
+                continue
+
+            put_match = put_pattern.search(line)
+            if put_match:
+                cpu = int(put_match.group(1))
+                if cpu in cpu_state and current_time is not None:
+                    close_interval(cpu, current_time)
+                    cpu_state[cpu] = None
                 continue
             
             d_match = dispatched_pattern.search(line)
@@ -64,60 +78,40 @@ def parse_log(filename, num_cpus):
                 cpu = int(d_match.group(1))
                 proc = int(d_match.group(2))
                 if cpu in cpu_state:
+                    if current_time is not None:
+                        close_interval(cpu, current_time)
                     cpu_state[cpu] = proc
                     if current_time is not None:
-                        cpu_schedule[cpu][current_time] = proc
+                        cpu_start[cpu] = current_time
                 continue
             
             p_match = processed_pattern.search(line)
             if p_match:
                 cpu = int(p_match.group(1))
                 if cpu in cpu_state:
+                    if current_time is not None:
+                        close_interval(cpu, current_time)
                     cpu_state[cpu] = None
                     if current_time is not None:
-                        cpu_schedule[cpu][current_time] = None
+                        cpu_start[cpu] = current_time
                 continue
             
             s_match = stopped_pattern.search(line)
             if s_match:
                 cpu = int(s_match.group(1))
                 if cpu in cpu_state:
+                    if current_time is not None:
+                        close_interval(cpu, current_time)
                     cpu_state[cpu] = None
                     if current_time is not None:
-                        cpu_schedule[cpu][current_time] = None
+                        cpu_start[cpu] = current_time
                 continue
-                
-    return cpu_schedule
 
-def merge_schedule(schedule):
-    """
-    Merge consecutive time slots.
-    """
-    intervals = []
-    sorted_times = sorted(schedule.keys())
-    if not sorted_times:
-        return intervals
-    
-    current_proc = schedule[sorted_times[0]]
-    start_time = sorted_times[0]
-    
-    for t in sorted_times[1:]:
-        if schedule[t] == current_proc:
-            continue
-        else:
-            duration = t - start_time
-            if duration > 0:
-                intervals.append((start_time, duration, current_proc))
-            start_time = t
-            current_proc = schedule[t]
-            
-    if sorted_times:
-        t = sorted_times[-1] + 1
-        duration = t - start_time
-        if duration > 0:
-            intervals.append((start_time, duration, current_proc))
-            
-    return intervals
+    if current_time is not None:
+        for cpu in cpu_state:
+            close_interval(cpu, current_time + 1)
+
+    return cpu_intervals
 
 def generate_gantt_chart(input_file, log_file, out_img):
     """
@@ -125,17 +119,13 @@ def generate_gantt_chart(input_file, log_file, out_img):
     """
     num_cpus = parse_input(input_file)
     
-    cpu_schedule = parse_log(log_file, num_cpus)
+    cpu_intervals = parse_log(log_file, num_cpus)
     
     max_time = 0
-    for schedule in cpu_schedule.values():
-        if schedule:
-            max_time = max(max_time, max(schedule.keys()))
-    max_time += 1
-    
-    cpu_intervals = {}
-    for cpu, schedule in cpu_schedule.items():
-        cpu_intervals[cpu] = merge_schedule(schedule)
+    for intervals in cpu_intervals.values():
+        for start, duration, _ in intervals:
+            max_time = max(max_time, start + duration)
+    max_time = max(max_time, 1)
     
     process_colors = {
         1: '#fbb4ae', # Pink
